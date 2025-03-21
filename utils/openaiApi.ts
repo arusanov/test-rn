@@ -6,6 +6,7 @@ import { FoodEntry } from "@/components/types";
  * Food analysis result schema
  */
 export interface FoodAnalysisResult {
+  foodFound: boolean;
   description: string;
   calories: number;
   nutrition: {
@@ -41,12 +42,15 @@ export async function analyzeFoodImage(
     const systemPrompt = `
       You are a food recognition AI with nutrition expertise.
       Analyze the provided food image and:
-      1. Identify the food item(s) present
+      1. Identify the food item(s) present. Only food items should be identified.
       2. Estimate the calories (be specific with a number)
       3. Provide approximate nutritional breakdown as percentages (protein, fat, carbs)
       
-      Respond ONLY with valid JSON matching this schema:
+      IMPORTANT: First determine if there is any food visible in the image.
+      
+      Respond with valid JSON matching this schema:
       {
+        "foodFound": boolean,
         "description": "Detailed food description",
         "calories": number,
         "nutrition": {
@@ -56,7 +60,19 @@ export async function analyzeFoodImage(
         }
       }
 
-      Ensure percentages add up to 100. If you're uncertain, provide best estimates.
+      If NO FOOD is visible in the image or you cannot identify any food with confidence, set "foodFound" to false and use empty or zero values for other fields:
+      {
+        "foodFound": false,
+        "description": "",
+        "calories": 0,
+        "nutrition": {
+          "protein": 0,
+          "fat": 0,
+          "carbs": 0
+        }
+      }
+    
+      Ensure percentages add up to 100. If you're uncertain about the exact food but can see some kind of food, set foodFound to true and provide your best estimate.
     `;
 
     // Prepare API request
@@ -115,8 +131,23 @@ export async function analyzeFoodImage(
 
       const result = JSON.parse(jsonStr) as FoodAnalysisResult;
 
-      // Validate the result structure
+      // If foodFound is false, don't validate other fields
+      if (result.foodFound === false) {
+        return {
+          foodFound: false,
+          description: "",
+          calories: 0,
+          nutrition: {
+            protein: 0,
+            fat: 0,
+            carbs: 0,
+          },
+        };
+      }
+
+      // Validate the result structure when food is found
       if (
+        typeof result.foodFound !== "boolean" ||
         !result.description ||
         typeof result.calories !== "number" ||
         !result.nutrition ||

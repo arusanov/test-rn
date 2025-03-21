@@ -109,7 +109,6 @@ const styles = StyleSheet.create({
   entryCard: {
     marginBottom: 12,
     width: "100%",
-    overflow: "hidden",
   },
   imageContainer: {
     height: 180,

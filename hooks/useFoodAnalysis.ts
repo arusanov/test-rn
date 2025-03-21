@@ -2,22 +2,6 @@ import { useState } from "react";
 import { useOpenAIVision } from "./useOpenAIVision";
 import { FoodAnalysisResult as OpenAIResult } from "@/utils/openaiApi";
 
-// Fallback food database for when API calls fail
-const fallbackFoodDatabase = [
-  { name: "Apple", calories: 95 },
-  { name: "Banana", calories: 105 },
-  { name: "Burger", calories: 550 },
-  { name: "Pizza Slice", calories: 285 },
-  { name: "Salad", calories: 120 },
-  { name: "Chicken Breast", calories: 165 },
-  { name: "Pasta", calories: 320 },
-  { name: "Steak", calories: 330 },
-  { name: "Sushi Roll", calories: 255 },
-  { name: "Avocado Toast", calories: 190 },
-  { name: "Oatmeal", calories: 150 },
-  { name: "Yogurt", calories: 120 },
-];
-
 export interface FoodAnalysisData {
   description: string;
   calories: number;
@@ -35,6 +19,8 @@ export const useFoodAnalysis = () => {
   const [nutritionData, setNutritionData] = useState<
     FoodAnalysisData["nutrition"] | null
   >(null);
+  const [foodNotRecognized, setFoodNotRecognized] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Use the OpenAI Vision hook
   const { analyzeImage: analyzeWithOpenAI, error: openAIError } =
@@ -42,31 +28,34 @@ export const useFoodAnalysis = () => {
 
   const analyzeImage = async (imageUri: string): Promise<void> => {
     setIsAnalyzing(true);
+    setFoodNotRecognized(false);
+    setError(null);
 
     try {
       // Attempt to analyze with OpenAI
       const result: OpenAIResult = await analyzeWithOpenAI(imageUri);
 
-      // Set the analysis results
+      // Check if food was found using the new foodFound field
+      if (!result.foodFound) {
+        setFoodNotRecognized(true);
+        setRecognizedFood("");
+        setEstimatedCalories(0);
+        setNutritionData(null);
+        return;
+      }
+
+      // Set the analysis results when food is found
       setRecognizedFood(result.description);
       setEstimatedCalories(result.calories);
       setNutritionData(result.nutrition);
-    } catch (error) {
-      console.warn("OpenAI analysis failed, using fallback:", error);
-
-      // Use fallback if OpenAI fails
-      const randomIndex = Math.floor(
-        Math.random() * fallbackFoodDatabase.length
-      );
-      const fallbackFood = fallbackFoodDatabase[randomIndex];
-
-      setRecognizedFood(fallbackFood.name);
-      setEstimatedCalories(fallbackFood.calories);
-      setNutritionData({
-        protein: 20, // Default fallback values
-        fat: 30,
-        carbs: 50,
-      });
+    } catch (err) {
+      // Handle error without using fallback
+      setFoodNotRecognized(true);
+      setRecognizedFood("");
+      setEstimatedCalories(0);
+      setNutritionData(null);
+      setError(err instanceof Error ? err.message : "Failed to analyze image");
+      console.error("Food analysis error:", err);
     } finally {
       setIsAnalyzing(false);
     }
@@ -76,6 +65,8 @@ export const useFoodAnalysis = () => {
     setRecognizedFood("");
     setEstimatedCalories(0);
     setNutritionData(null);
+    setFoodNotRecognized(false);
+    setError(null);
   };
 
   return {
@@ -85,6 +76,7 @@ export const useFoodAnalysis = () => {
     nutritionData,
     analyzeImage,
     resetAnalysis,
-    apiError: openAIError,
+    apiError: error || openAIError,
+    foodNotRecognized,
   };
 };

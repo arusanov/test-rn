@@ -67,6 +67,7 @@ function HomeScreen(): React.ReactElement {
     analyzeImage,
     resetAnalysis,
     nutritionData,
+    foodNotRecognized,
   } = useFoodAnalysis();
 
   // Food entries hook
@@ -188,7 +189,7 @@ function HomeScreen(): React.ReactElement {
           />
         </View>
 
-        {(isAnalyzing || recognizedFood) && (
+        {(isAnalyzing || recognizedFood || foodNotRecognized) && (
           <View style={styles.analysisContainer}>
             <FoodAnalysisResult
               isAnalyzing={isAnalyzing}

@@ -117,7 +117,37 @@ const FoodAnalysisResult = ({
   }
 
   if (!recognizedFood) {
-    return null;
+    return (
+      <Card
+        style={[
+          styles.noFoodContainer,
+          { backgroundColor: theme.colors.elevation.level1 },
+        ]}
+      >
+        <Card.Content style={styles.noFoodContent}>
+          <Text
+            variant="titleMedium"
+            style={{ color: theme.colors.error, marginBottom: 8 }}
+          >
+            No food detected
+          </Text>
+          <Text
+            variant="bodyMedium"
+            style={{
+              color: theme.colors.onSurfaceVariant,
+              textAlign: "center",
+            }}
+          >
+            Try taking another photo with clearer food items
+          </Text>
+          {onDiscard && (
+            <Button mode="text" onPress={onDiscard} style={{ marginTop: 16 }}>
+              Dismiss
+            </Button>
+          )}
+        </Card.Content>
+      </Card>
+    );
   }
 
   return (
@@ -190,6 +220,17 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   analyzeContent: {
+    alignItems: "center",
+    padding: 24,
+  },
+  noFoodContainer: {
+    width: "100%",
+    borderRadius: 12,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.1)",
+  },
+  noFoodContent: {
     alignItems: "center",
     padding: 24,
   },
