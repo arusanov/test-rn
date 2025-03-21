@@ -17,6 +17,19 @@ import {
 } from "react-native-paper";
 import { useColorScheme } from "@/components/useColorScheme";
 import { SnackbarProvider } from "@/contexts/SnackbarContext";
+import { IS_PRODUCTION } from "@/constants/Config";
+
+// Uncomment for production:
+// import * as Sentry from 'sentry-expo';
+
+// Initialize Sentry if in production
+// if (IS_PRODUCTION) {
+//   Sentry.init({
+//     dsn: 'YOUR_SENTRY_DSN_HERE',
+//     enableInExpoDevelopment: false,
+//     debug: false,
+//   });
+// }
 
 export {
   // Catch any errors thrown by the Layout component.

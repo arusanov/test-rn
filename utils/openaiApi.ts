@@ -1,5 +1,9 @@
 import * as FileSystem from "expo-file-system";
-import { OPENAI_API_KEY } from "../constants/Config";
+import {
+  OPENAI_API_KEY,
+  APP_CONFIG,
+  hasValidApiKey,
+} from "../constants/Config";
 import { FoodEntry } from "@/components/types";
 
 /**
@@ -24,6 +28,63 @@ export interface DailyNutritionAdvice {
   advice: string;
 }
 
+// Validate if API key exists
+const validateApiKey = (): void => {
+  if (!hasValidApiKey()) {
+    throw new Error(
+      "OpenAI API key is missing or invalid. Please add it to your environment variables."
+    );
+  }
+};
+
+// Constants
+const API_ENDPOINT = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_MODEL = APP_CONFIG.OPENAI.DEFAULT_MODEL;
+const API_TIMEOUT = APP_CONFIG.OPENAI.API_TIMEOUT_MS;
+
+/**
+ * Helper function to make OpenAI API requests with timeout
+ */
+async function makeOpenAIRequest(body: any): Promise<any> {
+  validateApiKey();
+
+  // Create an abort controller for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+
+  try {
+    const response = await fetch(API_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        `OpenAI API error (${response.status}): ${
+          errorData.error?.message || response.statusText || "Unknown error"
+        }`
+      );
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error.name === "AbortError") {
+      throw new Error("OpenAI API request timed out");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 /**
  * Analyzes a food image using OpenAI's Vision API
  * @param imageUri Local URI of the image to analyze
@@ -33,9 +94,16 @@ export async function analyzeFoodImage(
   imageUri: string
 ): Promise<FoodAnalysisResult> {
   try {
+    // Validate the image URI
+    if (!imageUri || !imageUri.startsWith("file://")) {
+      throw new Error("Invalid image URI format");
+    }
+
     // Convert image to base64
     const base64Image = await FileSystem.readAsStringAsync(imageUri, {
       encoding: FileSystem.EncodingType.Base64,
+    }).catch(() => {
+      throw new Error("Failed to read image file");
     });
 
     // Prepare the system prompt for accurate food detection
@@ -75,47 +143,32 @@ export async function analyzeFoodImage(
       Ensure percentages add up to 100. If you're uncertain about the exact food but can see some kind of food, set foodFound to true and provide your best estimate.
     `;
 
-    // Prepare API request
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt,
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Analyze this food image. Identify the food, estimate calories, and provide nutritional breakdown.",
+    // Make API request
+    const data = await makeOpenAIRequest({
+      model: DEFAULT_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt,
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Analyze this food image. Identify the food, estimate calories, and provide nutritional breakdown.",
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${base64Image}`,
               },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:image/jpeg;base64,${base64Image}`,
-                },
-              },
-            ],
-          },
-        ],
-        max_tokens: 5000,
-      }),
+            },
+          ],
+        },
+      ],
+      max_tokens: 5000,
     });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        `OpenAI API error: ${data.error?.message || "Unknown error"}`
-      );
-    }
 
     // Extract JSON result from the response
     const content = data.choices[0]?.message?.content;
@@ -131,7 +184,7 @@ export async function analyzeFoodImage(
 
       const result = JSON.parse(jsonStr) as FoodAnalysisResult;
 
-      // If foodFound is false, don't validate other fields
+      // If foodFound is false, return standardized empty result
       if (result.foodFound === false) {
         return {
           foodFound: false,
@@ -156,6 +209,30 @@ export async function analyzeFoodImage(
         typeof result.nutrition.carbs !== "number"
       ) {
         throw new Error("Invalid response format");
+      }
+
+      // Ensure nutrition percentages add up to 100
+      const totalNutrition =
+        result.nutrition.protein +
+        result.nutrition.fat +
+        result.nutrition.carbs;
+      if (Math.abs(totalNutrition - 100) > 5) {
+        // Normalize to 100 if more than 5% off
+        const factor = 100 / totalNutrition;
+        result.nutrition.protein = Math.round(
+          result.nutrition.protein * factor
+        );
+        result.nutrition.fat = Math.round(result.nutrition.fat * factor);
+        result.nutrition.carbs = Math.round(result.nutrition.carbs * factor);
+
+        // Adjust to ensure total is exactly 100
+        const newTotal =
+          result.nutrition.protein +
+          result.nutrition.fat +
+          result.nutrition.carbs;
+        if (newTotal !== 100) {
+          result.nutrition.carbs += 100 - newTotal;
+        }
       }
 
       return result;
@@ -183,6 +260,18 @@ export async function analyzeDailyNutrition(
   calorieGoal: number
 ): Promise<DailyNutritionAdvice> {
   try {
+    // Validate inputs
+    if (!Array.isArray(foodEntries) || foodEntries.length === 0) {
+      return {
+        summary: "No food entries to analyze",
+        advice: "Add some food entries to get personalized nutrition advice.",
+      };
+    }
+
+    if (!calorieGoal || calorieGoal <= 0) {
+      calorieGoal = 2000; // Default calorie goal if invalid
+    }
+
     // Calculate total calories and macronutrients
     let totalCalories = 0;
     let totalProtein = 0;
@@ -276,30 +365,15 @@ export async function analyzeDailyNutrition(
       Include specific foods I should consider adding to my diet based on what I'm already eating.
     `;
 
-    // Make OpenAI API call
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-        max_tokens: 2000,
-      }),
+    // Make API request
+    const data = await makeOpenAIRequest({
+      model: DEFAULT_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 2000,
     });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        `OpenAI API error: ${data.error?.message || "Unknown error"}`
-      );
-    }
 
     // Extract JSON result from the response
     const content = data.choices[0]?.message?.content;
@@ -327,6 +401,11 @@ export async function analyzeDailyNutrition(
     }
   } catch (error) {
     console.error("Daily nutrition analysis error:", error);
-    throw error;
+    // Provide fallback advice if API call fails
+    return {
+      summary: "Unable to analyze nutrition data",
+      advice:
+        "We're experiencing technical difficulties. Please try again later.",
+    };
   }
 }
